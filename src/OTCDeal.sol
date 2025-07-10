@@ -17,7 +17,6 @@ interface ISaleHandler {
  * INV tokens bought are deposited into sINV vault.
  * After the redemption timestamp has passed, users can redeem their lsINV shares for INV tokens.
  */
-
 contract OTCDeal is ERC20 {
     using SafeERC20 for IERC20;
 
@@ -74,7 +73,7 @@ contract OTCDeal is ERC20 {
         uint256 invAmount = dolaAmountIn * 1 ether / INV_PRICE;
         INV.safeTransferFrom(operator, address(this), invAmount);
         INV.approve(address(sINV), invAmount);
-        
+
         uint256 expectedShares = sINV.previewDeposit(invAmount);
         shares = sINV.deposit(invAmount, address(this));
         require(shares >= expectedShares, "Insufficient shares received");

@@ -97,15 +97,15 @@ contract OTCDealTest is Test {
     }
 
     function test_fail_buy_if_limit_not_set() public {
-        uint256 dolaAmountIn = 1_000_000 ether; 
+        uint256 dolaAmountIn = 1_000_000 ether;
         vm.prank(operator);
-        dola.mint(address(this), dolaAmountIn); 
+        dola.mint(address(this), dolaAmountIn);
 
         dola.approve(address(otc), dolaAmountIn);
         vm.expectRevert("Can only buy exact limit amount");
-        otc.buy(dolaAmountIn); 
-    
+        otc.buy(dolaAmountIn);
     }
+
     function test_fail_buy_below_limit() public {
         uint256 dolaAmountIn = 500_000 ether; // User1 tries to buy with 1.5 million DOLA
 
