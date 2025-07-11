@@ -28,7 +28,7 @@ contract OTCDealTest is Test {
         string memory rpcUrl = vm.rpcUrl("mainnet");
         vm.createSelectFork(rpcUrl, 22895952);
 
-        otc = new OTCDeal(operator , 25 ether); // 25 DOLA per INV token
+        otc = new OTCDeal(operator, 25 ether); // 25 DOLA per INV token
 
         dola = IMinter(address(otc.DOLA()));
         inv = IMinter(address(otc.INV()));
@@ -176,7 +176,7 @@ contract OTCDealTest is Test {
     function test_redeem_2_users() public {
         vm.prank(operator);
         otc.startVesting(); // Start the vesting period to set redemption timestamp
-        
+
         test_buy_2_users(); // First buy to set up users
         vm.warp(block.timestamp + 180 days); // Move to redemption time
         uint256 user1Shares = otc.balanceOf(user1);
@@ -221,7 +221,7 @@ contract OTCDealTest is Test {
     }
 
     function test_fail_buy_if_not_started() public {
-        OTCDeal newOtc = new OTCDeal(operator , 25 ether); // Create a new OTCDeal instance
+        OTCDeal newOtc = new OTCDeal(operator, 25 ether); // Create a new OTCDeal instance
         vm.prank(operator);
         newOtc.setDolaCommitment(user1, 1_000_000 ether);
 

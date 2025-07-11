@@ -24,10 +24,10 @@ contract OTCDeal is ERC20 {
     IERC20 public constant INV = IERC20(0x41D5D79431A913C4aE7d69a668ecdfE5fF9DFB68);
     IERC20 public constant DOLA = IERC20(0x865377367054516e17014CcdED1e7d814EDC9ce4);
     ISaleHandler public constant SALE_HANDLER = ISaleHandler(0xB4497A7351e4915182b3E577B3A2f411FA66b27f);
-    
+
     // The sweep timestamp is set to 1 year from deployment, after which the operator can sweep any remaining tokens.
     uint256 public immutable sweepTimestamp;
-    uint256 public immutable invPrice; 
+    uint256 public immutable invPrice;
 
     address public operator;
     address public pendingOperator;
@@ -163,6 +163,7 @@ contract OTCDeal is ERC20 {
      * @dev This function can only be called by the operator. It transfers all remaining tokens of a specified type to the operator.
      * @param token The address of the token to sweep.
      */
+
     function sweep(address token) external onlyOperator {
         require(block.timestamp >= sweepTimestamp, "Sweep not allowed yet");
         uint256 balance = IERC20(token).balanceOf(address(this));
