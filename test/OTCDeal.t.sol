@@ -26,9 +26,9 @@ contract OTCDealTest is Test {
 
     function setUp() public {
         string memory rpcUrl = vm.rpcUrl("mainnet");
-        vm.createSelectFork(rpcUrl);
+        vm.createSelectFork(rpcUrl, 22895952);
 
-        otc = new OTCDeal(operator);
+        otc = new OTCDeal(operator , 25 ether); // 25 DOLA per INV token
 
         dola = IMinter(address(otc.DOLA()));
         inv = IMinter(address(otc.INV()));
@@ -38,39 +38,39 @@ contract OTCDealTest is Test {
         dola.mint(address(user1), 1_000_000 ether); // Mint 1 million DOLA to user1
         dola.mint(address(user2), 2_000_000 ether); // Mint 2 million DOLA to user2
         inv.approve(address(otc), invAllowance); // Approve otc contract to pull INV tokens
-        otc.setLimit(user1, 1_000_000 ether); // Set user1's limit to 1 million DOLA
-        otc.setLimit(user2, 2_000_000 ether); // Set user2's limit to 2 million DOLA
+        otc.setDolaCommitment(user1, 1_000_000 ether); // Set user1's commitment to 1 million DOLA
+        otc.setDolaCommitment(user2, 2_000_000 ether); // Set user2's commitment to 2 million DOLA
         inv.mint(operator, invAllowance); // Mint 3 million INV to operator for testing
         otc.startBuyPeriod(); // Start the buy period
         vm.stopPrank();
     }
 
     function test_buy_2_users() public {
-        uint256 user1Limit = otc.limits(user1);
+        uint256 user1Commitment = otc.dolaCommitments(user1);
         uint256 sInvSupplyBefore = sInv.totalSupply();
 
         vm.startPrank(user1);
-        dola.approve(address(otc), user1Limit);
+        dola.approve(address(otc), user1Commitment);
 
-        uint256 lsInvAmount = otc.buy(user1Limit);
+        uint256 lsInvAmount = otc.buy(user1Commitment);
 
         assertEq(otc.balanceOf(user1), lsInvAmount, "lsINV balance not correct");
         assertEq(sInv.balanceOf(address(otc)), lsInvAmount, "sINV balance not correct");
         assertEq(sInv.balanceOf(address(otc)), sInv.totalSupply() - sInvSupplyBefore, "sINV supply not correct");
-        assertEq(dola.balanceOf(address(otc)), user1Limit, "DOLA balance not correct");
-        assertEq(otc.limits(user1), 0, "User1 limit not correct");
+        assertEq(dola.balanceOf(address(otc)), user1Commitment, "DOLA balance not correct");
+        assertEq(otc.dolaCommitments(user1), 0, "User1 commitment not correct");
         vm.stopPrank();
 
         vm.startPrank(user2);
-        uint256 user2Limit = otc.limits(user2);
-        dola.approve(address(otc), user2Limit);
-        uint256 lsInvAmount2 = otc.buy(user2Limit);
+        uint256 user2Commitment = otc.dolaCommitments(user2);
+        dola.approve(address(otc), user2Commitment);
+        uint256 lsInvAmount2 = otc.buy(user2Commitment);
 
         assertEq(otc.balanceOf(user2), lsInvAmount2, "lsINV balance not correct for user2");
         assertEq(sInv.balanceOf(address(otc)), lsInvAmount + lsInvAmount2, "sINV balance not correct for otc");
         assertEq(sInv.totalSupply(), sInvSupplyBefore + lsInvAmount + lsInvAmount2, "sINV total supply not correct");
-        assertEq(dola.balanceOf(address(otc)), user1Limit + user2Limit, "DOLA balance not correct for otc");
-        assertEq(otc.limits(user2), 0, "User2 limit not reduced correctly");
+        assertEq(dola.balanceOf(address(otc)), user1Commitment + user2Commitment, "DOLA balance not correct for otc");
+        assertEq(otc.dolaCommitments(user2), 0, "User2 commitment not reduced correctly");
         vm.stopPrank();
 
         uint256 dolaBalAfter = dola.balanceOf(address(otc));
@@ -80,40 +80,40 @@ contract OTCDealTest is Test {
         assertApproxEqAbs(
             (capacity - otc.SALE_HANDLER().getCapacity()),
             dolaBalAfter,
-            1000 ether,
+            1100 ether,
             "DOLA sent to sale handler should match"
         );
     }
 
-    function test_fail_buy_exceeding_limit() public {
+    function test_fail_buy_exceeding_commitment() public {
         uint256 dolaAmountIn = 1_500_000 ether; // User1 tries to buy with 1.5 million DOLA
 
         vm.startPrank(user1);
         dola.approve(address(otc), dolaAmountIn);
 
-        vm.expectRevert("Can only buy exact limit amount");
-        otc.buy(dolaAmountIn); // Should revert as user1's limit is 1 million DOLA
+        vm.expectRevert("Can only buy exact commitment amount");
+        otc.buy(dolaAmountIn); // Should revert as user1's commitment is 1 million DOLA
         vm.stopPrank();
     }
 
-    function test_fail_buy_if_limit_not_set() public {
+    function test_fail_buy_if_commitment_not_set() public {
         uint256 dolaAmountIn = 1_000_000 ether;
         vm.prank(operator);
         dola.mint(address(this), dolaAmountIn);
 
         dola.approve(address(otc), dolaAmountIn);
-        vm.expectRevert("Can only buy exact limit amount");
+        vm.expectRevert("Can only buy exact commitment amount");
         otc.buy(dolaAmountIn);
     }
 
-    function test_fail_buy_below_limit() public {
-        uint256 dolaAmountIn = 500_000 ether; // User1 tries to buy with 1.5 million DOLA
+    function test_fail_buy_below_commitment() public {
+        uint256 dolaAmountIn = 500_000 ether; // User1 tries to buy with 0.5 million DOLA
 
         vm.startPrank(user1);
         dola.approve(address(otc), dolaAmountIn);
 
-        vm.expectRevert("Can only buy exact limit amount");
-        otc.buy(dolaAmountIn); // Should revert as user1's limit is 1 million DOLA
+        vm.expectRevert("Can only buy exact commitment amount");
+        otc.buy(dolaAmountIn); // Should revert as user1's commitment is 1 million DOLA
         vm.stopPrank();
     }
 
@@ -139,6 +139,8 @@ contract OTCDealTest is Test {
     }
 
     function test_fail_redeem_if_zero_shares() public {
+        vm.prank(operator);
+        otc.startVesting(); // Start the vesting period to set redemption timestamp
         uint256 dolaAmountIn = 1_000_000 ether;
 
         vm.startPrank(user1);
@@ -152,6 +154,8 @@ contract OTCDealTest is Test {
     }
 
     function test_redeem() public {
+        vm.prank(operator);
+        otc.startVesting(); // Start the vesting period to set redemption timestamp
         uint256 dolaAmountIn = 1_000_000 ether;
 
         vm.startPrank(user1);
@@ -170,6 +174,9 @@ contract OTCDealTest is Test {
     }
 
     function test_redeem_2_users() public {
+        vm.prank(operator);
+        otc.startVesting(); // Start the vesting period to set redemption timestamp
+        
         test_buy_2_users(); // First buy to set up users
         vm.warp(block.timestamp + 180 days); // Move to redemption time
         uint256 user1Shares = otc.balanceOf(user1);
@@ -214,9 +221,9 @@ contract OTCDealTest is Test {
     }
 
     function test_fail_buy_if_not_started() public {
-        OTCDeal newOtc = new OTCDeal(operator);
+        OTCDeal newOtc = new OTCDeal(operator , 25 ether); // Create a new OTCDeal instance
         vm.prank(operator);
-        newOtc.setLimit(user1, 1_000_000 ether);
+        newOtc.setDolaCommitment(user1, 1_000_000 ether);
 
         vm.startPrank(user1);
         uint256 dolaAmountIn = 1_000_000 ether;
@@ -229,7 +236,7 @@ contract OTCDealTest is Test {
     function test_buy_extended_deadline() public {
         vm.warp(block.timestamp + 4 days + 1); // Move time forward to extend the deadline
         vm.startPrank(user1);
-        uint256 dolaAmountIn = otc.limits(user1);
+        uint256 dolaAmountIn = otc.dolaCommitments(user1);
         dola.approve(address(otc), dolaAmountIn);
         vm.expectRevert("Buy period ended or not started");
         otc.buy(dolaAmountIn); // Should revert as buy period is not started
@@ -242,12 +249,12 @@ contract OTCDealTest is Test {
         vm.prank(user1);
         uint256 shares = otc.buy(dolaAmountIn); // Should succeed now
         assertEq(shares, otc.balanceOf(user1), "Shares should match after extended buy");
-        assertEq(otc.limits(user1), 0, "User1 limit should be zero after buy");
+        assertEq(otc.dolaCommitments(user1), 0, "User1 commitment should be zero after buy");
     }
 
-    function test_fail_setLimit_if_not_operator() public {
+    function test_fail_setDolaCommitment_if_not_operator() public {
         vm.expectRevert("Only operator");
-        otc.setLimit(user1, 500_000 ether);
+        otc.setDolaCommitment(user1, 500_000 ether);
     }
 
     function test_fail_extendDeadline_if_not_operator() public {
@@ -258,6 +265,11 @@ contract OTCDealTest is Test {
     function test_fail_startBuyPeriod_if_not_operator() public {
         vm.expectRevert("Only operator");
         otc.startBuyPeriod();
+    }
+
+    function test_fail_startVesting_if_not_operator() public {
+        vm.expectRevert("Only operator");
+        otc.startVesting();
     }
 
     function test_fail_setPendingOperator_if_not_operator() public {
