@@ -164,10 +164,22 @@ contract RepayRewardEscrow is ERC20 {
      * @param token The address of the token to sweep.
      */
     function sweep(address token) external onlyGov {
+        require(token != address(DOLA), "Use withdrawDOLA instead");
         require(block.timestamp >= sweepTimestamp, "Sweep not allowed yet");
         uint256 balance = IERC20(token).balanceOf(address(this));
         IERC20(token).safeTransfer(gov, balance);
         emit Sweep(token, balance);
+    }
+
+    /**
+     * @notice Allows governance to withdraw DOLA from the contract.
+     * @dev This function can only be called by governance. It transfers the specified amount of DOLA to the given address.
+     * @param to The address to send the DOLA to.
+     * @param amount The amount of DOLA to withdraw.
+     */
+    function withdrawDOLA(address to, uint256 amount) external onlyGov {
+        require(amount > 0, "Amount must be greater than zero");
+        DOLA.safeTransfer(to, amount);
     }
 
     /**

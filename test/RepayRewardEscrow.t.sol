@@ -195,13 +195,21 @@ contract RepayRewardEscrowTest is Test {
     }
 
     function test_sweep_succeed_after_1Year() public {
-        uint256 dolaBalanceBefore = dola.balanceOf(gov);
+        uint256 invBalanceBefore = inv.balanceOf(gov);
+        vm.startPrank(gov);
+        inv.mint(address(escrow), 1_000_000 ether); // Mint some DOLA to escrow contract
+        vm.warp(block.timestamp + 365 days); // Move to sweep time
+        escrow.sweep(address(inv)); // Should revert as sweep is not allowed yet
+        vm.stopPrank();
+        assertEq(inv.balanceOf(gov), invBalanceBefore + 1_000_000 ether, "Gov should receive swept DOLA tokens");
+    }
+
+    function test_fail_sweep_if_DOLA() public {
         vm.startPrank(gov);
         dola.mint(address(escrow), 1_000_000 ether); // Mint some DOLA to escrow contract
         vm.warp(block.timestamp + 365 days); // Move to sweep time
+        vm.expectRevert("Use withdrawDOLA instead");
         escrow.sweep(address(dola)); // Should revert as sweep is not allowed yet
-        vm.stopPrank();
-        assertEq(dola.balanceOf(gov), dolaBalanceBefore + 1_000_000 ether, "Gov should receive swept DOLA tokens");
     }
 
     function test_fail_buy_if_not_started() public {
@@ -275,5 +283,29 @@ contract RepayRewardEscrowTest is Test {
         vm.prank(gov);
         escrow.setOperator(newOperator); // Change operator
         assertEq(escrow.operator(), newOperator, "New Operator should be set");
+    }
+
+    function test_withdrawDOLA() public {
+        address receiver = address(0x789);
+        assertEq(dola.balanceOf(receiver), 0, "Receiver should have zero DOLA balance initially");
+        uint256 dolaAmount = 500_000 ether;
+        vm.startPrank(gov);
+        dola.mint(address(escrow), dolaAmount); // Mint DOLA to escrow contract
+
+        vm.startPrank(gov);
+        escrow.withdrawDOLA(receiver, dolaAmount); // Withdraw DOLA to receiver
+
+        assertEq(dola.balanceOf(receiver), dolaAmount, "Receiver should receive withdrawn DOLA");
+    }
+
+    function test_fail_withdrawDOLA_if_not_governance() public {
+        address receiver = address(0x789);
+        uint256 dolaAmount = 500_000 ether;
+        vm.prank(gov);
+        dola.mint(address(escrow), dolaAmount); // Mint DOLA to escrow contract
+
+        vm.prank(user1);
+        vm.expectRevert("Only governance");
+        escrow.withdrawDOLA(receiver, dolaAmount); // Should revert as only governance can withdraw DOLA
     }
 }
