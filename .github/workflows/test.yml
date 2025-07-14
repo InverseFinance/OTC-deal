@@ -41,5 +41,5 @@ jobs:
         env:
           RPC_MAINNET: ${{ secrets.RPC_MAINNET }}
         run: |
-          forge test -vvv
+          forge test --via-ir -vvv
         id: test
