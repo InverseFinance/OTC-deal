@@ -11,6 +11,10 @@ interface IMinter is IERC20 {
     function mint(address to, uint256 amount) external;
 }
 
+interface IsINV is IERC4626 {
+    function buyDBR(uint256 exactInvIn, uint256 exactDbrOut, address to) external;
+}
+
 contract RepayRewardEscrowTest is Test {
     RepayRewardEscrow public escrow;
     IMinter public dola;
@@ -307,5 +311,245 @@ contract RepayRewardEscrowTest is Test {
         vm.prank(user1);
         vm.expectRevert("Only governance");
         escrow.withdrawDOLA(receiver, dolaAmount); // Should revert as only governance can withdraw DOLA
+    }
+
+    function test_complete_workflow() public {
+        escrow = new RepayRewardEscrow(gov, operator);
+        uint256 invAmount = 104_000 ether; // 104k INV
+
+        address user1 = address(0x123);
+        address user2 = address(0x456);
+        address user3 = address(0x789);
+        address user4 = address(0x987);
+        address user5 = address(0x654);
+        address user6 = address(0x321);
+
+        uint256 dolaAmount1 = 800_000 ether; // 800k DOLA for user1
+        uint256 dolaAmount2 = 800_000 ether; // 800k DOLA for user2
+        uint256 dolaAmount3 = 375_000 ether; // 375k DOLA for user3
+        uint256 dolaAmount4 = 200_000 ether; // 200k DOLA for user4
+        uint256 dolaAmount5 = 300_000 ether; // 300k DOLA for user5
+        uint256 dolaAmount6 = 125_000 ether; // 125k DOLA for user6
+
+        vm.startPrank(gov);
+        dola.mint(address(user1), dolaAmount1); // Mint 800k DOLA to user1
+        dola.mint(address(user2), dolaAmount2); // Mint 800k DOLA to user2
+        dola.mint(address(user3), dolaAmount3); // Mint 375k DOLA to user3
+        dola.mint(address(user4), dolaAmount4); // Mint 200k DOLA to user4
+        dola.mint(address(user5), dolaAmount5); // Mint 300k DOLA to user5
+        dola.mint(address(user6), dolaAmount6); // Mint 125k DOLA to user6
+
+        // Mint INV to governance and approve escrow contract
+        uint256 govBalanceBefore = inv.balanceOf(gov);
+        inv.mint(gov, invAmount); // Mint 104000 INV to gov
+        uint256 govBalanceAfter = inv.balanceOf(gov);
+        inv.approve(address(escrow), invAmount); // Approve escrow contract to pull 104000 INV tokens
+
+        vm.stopPrank();
+
+        vm.startPrank(operator);
+        escrow.setDolaAllocation(user1, dolaAmount1); // Set user1's commitment to 800k DOLA
+        escrow.setDolaAllocation(user2, dolaAmount2); // Set user2's commitment to 800k DOLA
+        escrow.setDolaAllocation(user3, dolaAmount3); // Set user3's commitment to 375k DOLA
+        escrow.setDolaAllocation(user4, dolaAmount4); // Set user4's commitment to 200k DOLA
+        escrow.setDolaAllocation(user5, dolaAmount5); // Set user5's commitment to 300k DOLA
+        escrow.setDolaAllocation(user6, dolaAmount6); // Set user6's commitment to 125k DOLA
+        vm.stopPrank();
+
+        vm.prank(gov);
+        escrow.start(); // Start the buy period and set the vesting timestamp
+
+        // User1 buys lsINV shares
+        vm.startPrank(user1);
+        dola.approve(address(escrow), dolaAmount1);
+        uint256 expectedSInvVested = sInv.previewDeposit(dolaAmount1 * 1 ether / escrow.INV_PRICE());
+        uint256 lsInvAmount1 = escrow.buy();
+        assertEq(lsInvAmount1, expectedSInvVested, "lsINV amount should match expected sINV vested amount for user1");
+        assertEq(escrow.balanceOf(user1), lsInvAmount1, "lsINV balance for user1 should be correct");
+        assertEq(sInv.balanceOf(address(escrow)), lsInvAmount1, "sINV balance for escrow should be correct");
+        assertEq(escrow.dolaAllocations(user1), 0, "User1 commitment should be zero after buy");
+        vm.stopPrank();
+
+        // User2 buys lsINV shares
+        vm.startPrank(user2);
+        dola.approve(address(escrow), dolaAmount2);
+        expectedSInvVested = sInv.previewDeposit(dolaAmount2 * 1 ether / escrow.INV_PRICE());
+        uint256 lsInvAmount2 = escrow.buy();
+        assertEq(lsInvAmount2, expectedSInvVested, "lsINV amount should match expected sINV vested amount for user2");
+        assertEq(escrow.balanceOf(user2), lsInvAmount2, "lsINV balance for user2 should be correct");
+        assertEq(
+            sInv.balanceOf(address(escrow)), lsInvAmount1 + lsInvAmount2, "sINV balance for escrow should be correct"
+        );
+        assertEq(escrow.dolaAllocations(user2), 0, "User2 commitment should be zero after buy");
+        vm.stopPrank();
+
+        // User3 buys lsINV shares
+        vm.startPrank(user3);
+        dola.approve(address(escrow), dolaAmount3);
+        expectedSInvVested = sInv.previewDeposit(dolaAmount3 * 1 ether / escrow.INV_PRICE());
+        uint256 lsInvAmount3 = escrow.buy();
+        assertEq(lsInvAmount3, expectedSInvVested, "lsINV amount should match expected sINV vested amount for user3");
+        assertEq(escrow.balanceOf(user3), lsInvAmount3, "lsINV balance for user3 should be correct");
+        assertEq(
+            sInv.balanceOf(address(escrow)),
+            lsInvAmount1 + lsInvAmount2 + lsInvAmount3,
+            "sINV balance for escrow should be correct"
+        );
+        assertEq(escrow.dolaAllocations(user3), 0, "User3 commitment should be zero after buy");
+        vm.stopPrank();
+
+        // User4 buys lsINV shares
+        vm.startPrank(user4);
+        dola.approve(address(escrow), dolaAmount4);
+        expectedSInvVested = sInv.previewDeposit(dolaAmount4 * 1 ether / escrow.INV_PRICE());
+        uint256 lsInvAmount4 = escrow.buy();
+        assertEq(lsInvAmount4, expectedSInvVested, "lsINV amount should match expected sINV vested amount for user4");
+        assertEq(escrow.balanceOf(user4), lsInvAmount4, "lsINV balance for user4 should be correct");
+        assertEq(
+            sInv.balanceOf(address(escrow)),
+            lsInvAmount1 + lsInvAmount2 + lsInvAmount3 + lsInvAmount4,
+            "sINV balance for escrow should be correct"
+        );
+        assertEq(escrow.dolaAllocations(user4), 0, "User4 commitment should be zero after buy");
+        vm.stopPrank();
+
+        // User5 buys lsINV shares
+        vm.startPrank(user5);
+        dola.approve(address(escrow), dolaAmount5);
+        expectedSInvVested = sInv.previewDeposit(dolaAmount5 * 1 ether / escrow.INV_PRICE());
+        uint256 lsInvAmount5 = escrow.buy();
+        assertEq(lsInvAmount5, expectedSInvVested, "lsINV amount should match expected sINV vested amount for user5");
+        assertEq(escrow.balanceOf(user5), lsInvAmount5, "lsINV balance for user5 should be correct");
+        assertEq(
+            sInv.balanceOf(address(escrow)),
+            lsInvAmount1 + lsInvAmount2 + lsInvAmount3 + lsInvAmount4 + lsInvAmount5,
+            "sINV balance for escrow should be correct"
+        );
+        assertEq(escrow.dolaAllocations(user5), 0, "User5 commitment should be zero after buy");
+        vm.stopPrank();
+
+        // User6 buys lsINV shares
+        vm.startPrank(user6);
+        dola.approve(address(escrow), dolaAmount6);
+        expectedSInvVested = sInv.previewDeposit(dolaAmount6 * 1 ether / escrow.INV_PRICE());
+        uint256 lsInvAmount6 = escrow.buy();
+        assertEq(lsInvAmount6, expectedSInvVested, "lsINV amount should match expected sINV vested amount for user6");
+        assertEq(escrow.balanceOf(user6), lsInvAmount6, "lsINV balance for user6 should be correct");
+        assertEq(
+            sInv.balanceOf(address(escrow)),
+            lsInvAmount1 + lsInvAmount2 + lsInvAmount3 + lsInvAmount4 + lsInvAmount5 + lsInvAmount6,
+            "sINV balance for escrow should be correct"
+        );
+        assertEq(escrow.dolaAllocations(user6), 0, "User6 commitment should be zero after buy");
+        vm.stopPrank();
+
+        assertEq(
+            escrow.totalSupply(),
+            lsInvAmount1 + lsInvAmount2 + lsInvAmount3 + lsInvAmount4 + lsInvAmount5 + lsInvAmount6,
+            "Total sINV supply should match total lsINV shares purchased"
+        );
+        assertEq(inv.allowance(gov, address(escrow)), 0, "Gov should have reduced INV allowance");
+
+        assertEq(inv.balanceOf(address(escrow)), 0, "Escrow should not have INV");
+
+        assertEq(inv.balanceOf(gov), govBalanceBefore, "Gov should have reduced INV balance after buying lsINV shares");
+
+        assertEq(
+            govBalanceAfter - inv.balanceOf(gov),
+            invAmount,
+            "Gov should have reduced INV balance after buying lsINV shares"
+        );
+
+        assertEq(
+            dola.balanceOf(address(escrow)),
+            dolaAmount1 + dolaAmount2 + dolaAmount3 + dolaAmount4 + dolaAmount5 + dolaAmount6,
+            "Escrow should hold total DOLA from all users"
+        );
+
+        // All user have bought lsINV shares, sending to Sale Handler
+        uint256 capacityBefore = escrow.SALE_HANDLER().getCapacity();
+        escrow.sendToSaleHandler(); // Send DOLA to sale handler
+        uint256 capacityAfter = escrow.SALE_HANDLER().getCapacity();
+        assertApproxEqAbs(
+            capacityBefore - capacityAfter,
+            dolaAmount1 + dolaAmount2 + dolaAmount3 + dolaAmount4 + dolaAmount5 + dolaAmount6,
+            1100 ether,
+            "DOLA sent to sale handler should match total DOLA from all users"
+        );
+
+        vm.warp(block.timestamp + 180 days); // Move to redemption time
+
+        // Add INV rewards by buying DBRs
+        address buyer = address(0x123456789);
+        vm.prank(gov);
+        inv.mint(buyer, 1000 ether); // Mint INV to buyer
+        vm.startPrank(buyer);
+        inv.approve(address(sInv), 1000 ether); // Approve escrow contract to pull INV tokens
+        IsINV(address(sInv)).buyDBR(100 ether, 43000 ether, address(buyer)); // Buy DBR with INV
+        vm.warp(block.timestamp + 15 days); // Move to redemption time
+
+        // User1 redeems lsINV shares
+        vm.startPrank(user1);
+        uint256 user1Shares = escrow.balanceOf(user1);
+        console2.log(sInv.previewRedeem(user1Shares), "Expected sINV shares to redeem for 100 INV");
+        escrow.redeem(user1Shares);
+        assertEq(sInv.balanceOf(user1), user1Shares, "User1 should receive sINV tokens");
+        assertEq(escrow.balanceOf(user1), 0, "User1's shares should be burned");
+        sInv.redeem(user1Shares, user1, user1); // Redeem sINV shares
+        assertGt(inv.balanceOf(user1), 32000 ether, "User1 should have INV tokens after redeeming sINV");
+        vm.stopPrank();
+
+        // User2 redeems lsINV shares
+        vm.startPrank(user2);
+        uint256 user2Shares = escrow.balanceOf(user2);
+        escrow.redeem(user2Shares);
+        assertEq(sInv.balanceOf(user2), user2Shares, "User2 should receive sINV tokens");
+        assertEq(escrow.balanceOf(user2), 0, "User2's shares should be burned");
+        sInv.redeem(user2Shares, user2, user2);
+        assertGt(inv.balanceOf(user2), 32000 ether, "User2 should have INV tokens after redeeming sINV");
+        vm.stopPrank();
+
+        // User3 redeems lsINV shares
+        vm.startPrank(user3);
+        uint256 user3Shares = escrow.balanceOf(user3);
+        escrow.redeem(user3Shares);
+        assertEq(sInv.balanceOf(user3), user3Shares, "User3 should receive sINV tokens");
+        assertEq(escrow.balanceOf(user3), 0, "User3's shares should be burned");
+        sInv.redeem(user3Shares, user3, user3);
+        assertGt(inv.balanceOf(user3), 15000 ether, "User3 should have INV tokens after redeeming sINV");
+        vm.stopPrank();
+
+        // User4 redeems lsINV shares
+        vm.startPrank(user4);
+        uint256 user4Shares = escrow.balanceOf(user4);
+        escrow.redeem(user4Shares);
+        assertEq(sInv.balanceOf(user4), user4Shares, "User4 should receive sINV tokens");
+        assertEq(escrow.balanceOf(user4), 0, "User4's shares should be burned");
+        sInv.redeem(user4Shares, user4, user4);
+        assertGt(inv.balanceOf(user4), 8000 ether, "User4 should have INV tokens after redeeming sINV");
+        vm.stopPrank();
+
+        // User5 redeems lsINV shares
+        vm.startPrank(user5);
+        uint256 user5Shares = escrow.balanceOf(user5);
+        escrow.redeem(user5Shares);
+        assertEq(sInv.balanceOf(user5), user5Shares, "User5 should receive sINV tokens");
+        assertEq(escrow.balanceOf(user5), 0, "User5's shares should be burned");
+        sInv.redeem(user5Shares, user5, user5);
+        assertGt(inv.balanceOf(user5), 12000 ether, "User5 should have INV tokens after redeeming sINV");
+        vm.stopPrank();
+
+        // User6 redeems lsINV shares
+        vm.startPrank(user6);
+        uint256 user6Shares = escrow.balanceOf(user6);
+        escrow.redeem(user6Shares);
+        assertEq(sInv.balanceOf(user6), user6Shares, "User6 should receive sINV tokens");
+        assertEq(escrow.balanceOf(user6), 0, "User6's shares should be burned");
+        sInv.redeem(user6Shares, user6, user6);
+        assertGt(inv.balanceOf(user6), 5000 ether, "User6 should have INV tokens after redeeming sINV");
+        vm.stopPrank();
+
+        assertEq(escrow.totalSupply(), 0, "Escrow total supply should be zero after all redemptions");
+        assertEq(sInv.balanceOf(address(escrow)), 0, "Escrow should have no sINV after redemptions");
     }
 }
