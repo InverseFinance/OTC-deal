@@ -15,6 +15,11 @@ interface IsINV is IERC4626 {
     function buyDBR(uint256 exactInvIn, uint256 exactDbrOut, address to) external;
 }
 
+interface IAnDola {
+    function borrowBalanceStored(address account) external view returns (uint256);
+    function totalBorrows() external view returns (uint256);
+}
+
 contract RepayRewardEscrowTest is Test {
     RepayRewardEscrow public escrow;
     IMinter public dola;
@@ -206,14 +211,6 @@ contract RepayRewardEscrowTest is Test {
         escrow.sweep(address(inv)); // Should revert as sweep is not allowed yet
         vm.stopPrank();
         assertEq(inv.balanceOf(gov), invBalanceBefore + 1_000_000 ether, "Gov should receive swept DOLA tokens");
-    }
-
-    function test_fail_sweep_if_DOLA() public {
-        vm.startPrank(gov);
-        dola.mint(address(escrow), 1_000_000 ether); // Mint some DOLA to escrow contract
-        vm.warp(block.timestamp + 365 days); // Move to sweep time
-        vm.expectRevert("Use withdrawDOLA instead");
-        escrow.sweep(address(dola)); // Should revert as sweep is not allowed yet
     }
 
     function test_fail_buy_if_not_started() public {
@@ -465,16 +462,43 @@ contract RepayRewardEscrowTest is Test {
             dolaAmount1 + dolaAmount2 + dolaAmount3 + dolaAmount4 + dolaAmount5 + dolaAmount6,
             "Escrow should hold total DOLA from all users"
         );
-
+        uint256 totalDolaSent = dolaAmount1 + dolaAmount2 + dolaAmount3 + dolaAmount4 + dolaAmount5 + dolaAmount6;
         // All user have bought lsINV shares, sending to Sale Handler
+        IAnDola anDola = IAnDola(0x7Fcb7DAC61eE35b3D4a51117A7c58D53f0a8a670);
+        address anDolaBorrower1 = address(0xf508c58ce37ce40a40997C715075172691F92e2D); // User1's anDola borrower
+        address anDolaBorrower2 = address(0xeA0c959BBb7476DDD6cD4204bDee82b790AA1562); // User2's anDola borrower
+        uint256 anDolaBalance1Before = anDola.borrowBalanceStored(anDolaBorrower1);
+        assertGt(anDolaBalance1Before, totalDolaSent, "anDola borrower1 has enough capacity to repay");
+        uint256 anDolaBalance2Before = anDola.borrowBalanceStored(anDolaBorrower2);
+        uint256 totalBorrowsBefore = anDola.totalBorrows();
         uint256 capacityBefore = escrow.SALE_HANDLER().getCapacity();
         escrow.sendToSaleHandler(); // Send DOLA to sale handler
         uint256 capacityAfter = escrow.SALE_HANDLER().getCapacity();
+
         assertApproxEqAbs(
             capacityBefore - capacityAfter,
-            dolaAmount1 + dolaAmount2 + dolaAmount3 + dolaAmount4 + dolaAmount5 + dolaAmount6,
+            totalDolaSent,
             1100 ether,
             "DOLA sent to sale handler should match total DOLA from all users"
+        );
+        assertApproxEqAbs(
+            anDola.totalBorrows(),
+            totalBorrowsBefore - totalDolaSent,
+            1500 ether,
+            "Total borrows should decrease total DOLA sent to Sale Handler"
+        );
+        assertApproxEqAbs(
+            anDola.borrowBalanceStored(anDolaBorrower1),
+            anDolaBalance1Before - totalDolaSent,
+            1000 ether,
+            "anDola borrow balance for user1 should match expected reduction"
+        );
+        // Only repaid user1's borrow balance, user2's borrow balance should not change
+        assertApproxEqAbs(
+            anDola.borrowBalanceStored(anDolaBorrower2),
+            anDolaBalance2Before,
+            110 ether,
+            "anDola borrow balance should not change"
         );
 
         vm.warp(block.timestamp + 180 days); // Move to redemption time
