@@ -278,6 +278,12 @@ contract RepayRewardEscrowTest is Test {
         escrow.acceptGov();
     }
 
+    function test_fail_start_to_be_called_again() public {
+        vm.startPrank(gov);
+        vm.expectRevert("Already started");
+        escrow.start(); // Should revert as start has already been called
+    }
+
     function test_setOperator() public {
         assertEq(escrow.operator(), operator, "Operator should be set to initial value");
         address newOperator = address(0x789);

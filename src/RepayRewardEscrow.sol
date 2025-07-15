@@ -152,6 +152,7 @@ contract RepayRewardEscrow is ERC20 {
      * The buy period lasts for 4 days.
      */
     function start() external onlyGov {
+        require(redemptionTimestamp == 0, "Already started");
         buyDeadline = block.timestamp + 4 days;
         redemptionTimestamp = block.timestamp + 180 days;
         emit BuyDeadlineUpdated(buyDeadline);
