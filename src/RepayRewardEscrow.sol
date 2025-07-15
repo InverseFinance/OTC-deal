@@ -164,7 +164,6 @@ contract RepayRewardEscrow is ERC20 {
      * @param token The address of the token to sweep.
      */
     function sweep(address token) external onlyGov {
-        require(token != address(DOLA), "Use withdrawDOLA instead");
         require(block.timestamp >= sweepTimestamp, "Sweep not allowed yet");
         uint256 balance = IERC20(token).balanceOf(address(this));
         IERC20(token).safeTransfer(gov, balance);
