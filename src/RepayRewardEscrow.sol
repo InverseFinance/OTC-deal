@@ -8,15 +8,18 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 interface ISaleHandler {
     function onReceive() external;
-    function getCapacity() external view returns (uint256);
 }
 
+interface IAnDola {
+    function borrowBalanceStored(address borrower) external view returns (uint256);
+}
 /**
  * @title RepayRewardEscrow
  * This contract allows users to buy lsINV shares (1:1 with sINV shares) using DOLA, with a specific allocation on the amount of INV they can purchase.
  * INV tokens bought are deposited into sINV vault.
  * After the redemption timestamp has passed, users can redeem their lsINV for sINV shares.
  */
+
 contract RepayRewardEscrow is ERC20 {
     using SafeERC20 for IERC20;
     using SafeERC20 for IERC4626;
@@ -26,6 +29,8 @@ contract RepayRewardEscrow is ERC20 {
     IERC20 public constant DOLA = IERC20(0x865377367054516e17014CcdED1e7d814EDC9ce4);
     ISaleHandler public constant SALE_HANDLER = ISaleHandler(0xB4497A7351e4915182b3E577B3A2f411FA66b27f);
     uint256 public constant INV_PRICE = 25 ether; // The price of INV in DOLA, set to 25 DOLA per INV.
+    IAnDola public constant AnDOLA = IAnDola(0x7Fcb7DAC61eE35b3D4a51117A7c58D53f0a8a670);
+    address public constant anDolaBorrower1 = address(0xf508c58ce37ce40a40997C715075172691F92e2D); // anDola borrower1 in the Sale Handler
 
     // The sweep timestamp is set to 1 year from deployment, after which the operator can sweep any remaining tokens.
     uint256 public immutable sweepTimestamp;
@@ -67,9 +72,10 @@ contract RepayRewardEscrow is ERC20 {
     /**
      * @notice Allows users to buy lsINV tokens using DOLA. lsINV can be redeemed for sINV after the redemption period.
      * @dev The user must have a allocation set for the exact amount of DOLA they can spend and approve this contract to spend it.
+     * @param minLsInvOut The minimum amount of lsINV shares the user expects to receive (1:1 with sINV).
      * @return lsInvOut The number of lsINV shares purchased.
      */
-    function buy() external returns (uint256 lsInvOut) {
+    function buy(uint256 minLsInvOut) external returns (uint256 lsInvOut) {
         require(block.timestamp <= buyDeadline, "Buy period ended or not started");
         require(dolaAllocations[msg.sender] != 0, "No DOLA allocation set for user");
 
@@ -80,9 +86,8 @@ contract RepayRewardEscrow is ERC20 {
         INV.safeTransferFrom(gov, address(this), invAmount);
         INV.approve(address(sINV), invAmount);
 
-        uint256 expectedShares = sINV.previewDeposit(invAmount);
         lsInvOut = sINV.deposit(invAmount, address(this));
-        require(lsInvOut >= expectedShares, "Insufficient shares received");
+        require(lsInvOut >= minLsInvOut, "Insufficient shares received");
 
         _mint(msg.sender, lsInvOut);
 
@@ -107,21 +112,23 @@ contract RepayRewardEscrow is ERC20 {
         emit Redeem(msg.sender, lsInvAmount);
     }
 
+    // Admin functions
+
     /**
-     * @notice Allows anyone to send DOLA to the sale handler for debt repayment.
-     * Will send up to the Sale Handler capacity.
+     * @notice Send DOLA to the sale handler for debt repayment.
+     * @dev Only the operator can call this function. Will send up to the Sale Handler capacity for anDOLA borrower1.
+     * @param dolaAmount The amount of DOLA to send to the sale handler.
      */
-    function sendToSaleHandler() external {
+    function sendToSaleHandler(uint256 dolaAmount) external onlyOperator {
         uint256 bal = DOLA.balanceOf(address(this));
         require(bal > 0, "No DOLA to send");
-        uint256 capacity = SALE_HANDLER.getCapacity();
-        uint256 amount = bal > capacity ? capacity : bal;
+        uint256 amount = dolaAmount > bal ? bal : dolaAmount;
+        uint256 capacity = AnDOLA.borrowBalanceStored(anDolaBorrower1);
+        amount = amount > capacity ? capacity : amount;
         DOLA.transfer(address(SALE_HANDLER), amount);
         SALE_HANDLER.onReceive();
         emit DolaRepayment(amount);
     }
-
-    // Admin functions
 
     /**
      * @notice Sets a allocation for a user on how much DOLA they can spend to buy lsINV.
@@ -135,13 +142,11 @@ contract RepayRewardEscrow is ERC20 {
     }
 
     /**
-     * @notice Extends the buy deadline by a specified number of days.
-     * @dev This function can only be called by the operator. It allows the operator to extend the buy period if needed.
-     * @param extraDays The number of days to extend the buy deadline by.
+     * @notice Set the buy deadline by a specified number of days.
+     * @dev This function can only be called by the operator. It allows the operator to set the buy period if needed.
+     * @param newDeadline The timestamp for the new deadline for buying lsINV tokens.
      */
-    function extendDeadline(uint256 extraDays) external onlyOperator {
-        uint256 newDeadline = block.timestamp + (extraDays * 1 days);
-        require(newDeadline > buyDeadline, "New deadline must be later than current");
+    function setDeadline(uint256 newDeadline) external onlyOperator {
         buyDeadline = newDeadline;
         emit BuyDeadlineUpdated(buyDeadline);
     }

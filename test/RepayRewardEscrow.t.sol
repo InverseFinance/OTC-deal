@@ -5,7 +5,7 @@ import "forge-std/Test.sol";
 import "forge-std/console.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/interfaces/IERC4626.sol";
-import "src/RepayRewardEscrow.sol";
+import {RepayRewardEscrow} from "src/RepayRewardEscrow.sol";
 
 interface IMinter is IERC20 {
     function mint(address to, uint256 amount) external;
@@ -28,6 +28,7 @@ contract RepayRewardEscrowTest is Test {
 
     address gov = address(0x926dF14a23BE491164dCF93f4c468A50ef659D5B); // GOV
     address operator = address(0x9D5Df30F475CEA915b1ed4C0CCa59255C897b61B); // TWG
+    IAnDola anDola = IAnDola(0x7Fcb7DAC61eE35b3D4a51117A7c58D53f0a8a670);
 
     address user1 = address(0x123);
     address user2 = address(0x456);
@@ -66,11 +67,11 @@ contract RepayRewardEscrowTest is Test {
         dola.approve(address(escrow), user1Commitment);
         uint256 expectedInvAmount = user1Commitment * 1 ether / escrow.INV_PRICE();
         assertEq(expectedInvAmount, 40_000 ether, "Expected INV amount should be 40,000"); // 1 million DOLA at 25 DOLA/INV
-        uint256 expecteSInvVested = sInv.previewDeposit(expectedInvAmount);
+        uint256 expectedSInvVested = sInv.previewDeposit(expectedInvAmount);
 
-        uint256 lsInvAmount = escrow.buy();
+        uint256 lsInvAmount = escrow.buy(expectedSInvVested);
 
-        assertEq(lsInvAmount, expecteSInvVested, "lsINV amount should match expected sINV vested amount");
+        assertEq(lsInvAmount, expectedSInvVested, "lsINV amount should match expected sINV vested amount");
         assertEq(escrow.balanceOf(user1), lsInvAmount, "lsINV balance not correct");
         assertEq(sInv.balanceOf(address(escrow)), lsInvAmount, "sINV balance not correct");
         assertEq(sInv.balanceOf(address(escrow)), sInv.totalSupply() - sInvSupplyBefore, "sINV supply not correct");
@@ -83,12 +84,12 @@ contract RepayRewardEscrowTest is Test {
         dola.approve(address(escrow), user2Commitment);
         expectedInvAmount = user2Commitment * 1 ether / escrow.INV_PRICE();
         assertEq(expectedInvAmount, 80_000 ether, "Expected INV amount should be 80,000"); // 2 million DOLA at 25 DOLA/INV
-        expecteSInvVested = sInv.previewDeposit(expectedInvAmount);
+        expectedSInvVested = sInv.previewDeposit(expectedInvAmount);
 
         // User2 buys lsINV shares
-        uint256 lsInvAmount2 = escrow.buy();
+        uint256 lsInvAmount2 = escrow.buy(expectedSInvVested);
 
-        assertEq(lsInvAmount2, expecteSInvVested, "lsINV amount should match expected sINV vested amount for user2");
+        assertEq(lsInvAmount2, expectedSInvVested, "lsINV amount should match expected sINV vested amount for user2");
         assertEq(escrow.balanceOf(user2), lsInvAmount2, "lsINV balance not correct for user2");
         assertEq(sInv.balanceOf(address(escrow)), lsInvAmount + lsInvAmount2, "sINV balance not correct for escrow");
         assertEq(sInv.totalSupply(), sInvSupplyBefore + lsInvAmount + lsInvAmount2, "sINV total supply not correct");
@@ -99,11 +100,12 @@ contract RepayRewardEscrowTest is Test {
         vm.stopPrank();
 
         uint256 dolaBalAfter = dola.balanceOf(address(escrow));
-        uint256 capacity = escrow.SALE_HANDLER().getCapacity();
-        escrow.sendToSaleHandler(); // Send DOLA to sale handler
+        uint256 capacity = anDola.borrowBalanceStored(escrow.anDolaBorrower1());
+        vm.prank(operator);
+        escrow.sendToSaleHandler(dolaBalAfter); // Send DOLA to sale handler
         assertEq(dola.balanceOf(address(escrow)), 0, "DOLA balance should be zero after sending to sale handler");
         assertApproxEqAbs(
-            (capacity - escrow.SALE_HANDLER().getCapacity()),
+            (capacity - anDola.borrowBalanceStored(escrow.anDolaBorrower1())),
             dolaBalAfter,
             1100 ether,
             "DOLA sent to sale handler should match"
@@ -114,7 +116,7 @@ contract RepayRewardEscrowTest is Test {
         assertGt(escrow.dolaAllocations(user1), 0, "User1 should have a DOLA allocation");
         vm.prank(user1);
         vm.expectRevert();
-        escrow.buy();
+        escrow.buy(1 ether);
         vm.stopPrank();
     }
 
@@ -125,7 +127,7 @@ contract RepayRewardEscrowTest is Test {
 
         dola.approve(address(escrow), dolaAmountIn);
         vm.expectRevert("No DOLA allocation set for user");
-        escrow.buy();
+        escrow.buy(1 ether);
     }
 
     function test_fail_redeem_before_redemption_timestamp() public {
@@ -134,7 +136,7 @@ contract RepayRewardEscrowTest is Test {
         vm.startPrank(user1);
         dola.approve(address(escrow), dolaAmountIn);
 
-        uint256 lsInvAmount = escrow.buy();
+        uint256 lsInvAmount = escrow.buy(1 ether);
 
         vm.expectRevert("Redemption not started yet");
         escrow.redeem(lsInvAmount); // Should revert as redemption is not started yet
@@ -146,7 +148,7 @@ contract RepayRewardEscrowTest is Test {
         vm.startPrank(user1);
         dola.approve(address(escrow), dolaAmountIn);
 
-        escrow.buy();
+        escrow.buy(1 ether);
 
         vm.warp(block.timestamp + 180 days); // Move to redemption time
         vm.expectRevert("lsInvAmount must be greater than zero");
@@ -159,7 +161,7 @@ contract RepayRewardEscrowTest is Test {
         vm.startPrank(user1);
         dola.approve(address(escrow), dolaAmountIn);
 
-        uint256 lsInvAmount = escrow.buy();
+        uint256 lsInvAmount = escrow.buy(sInv.previewDeposit(dolaAmountIn * 1 ether / escrow.INV_PRICE()));
 
         vm.warp(block.timestamp + 180 days); // Move to redemption time
 
@@ -199,8 +201,16 @@ contract RepayRewardEscrowTest is Test {
     }
 
     function test_fail_sendToSaleHandler_if_no_dola_balance() public {
+        vm.prank(operator);
         vm.expectRevert("No DOLA to send");
-        escrow.sendToSaleHandler();
+        escrow.sendToSaleHandler(1 ether);
+    }
+
+    function test_fail_sendToSaleHandle_if_not_operator() public {
+        vm.prank(gov);
+        dola.mint(address(escrow), 10 ether); // Mint some DOLA to escrow contract
+        vm.expectRevert("Only operator");
+        escrow.sendToSaleHandler(1 ether);
     }
 
     function test_sweep_succeed_after_1Year() public {
@@ -222,7 +232,7 @@ contract RepayRewardEscrowTest is Test {
         uint256 dolaAmountIn = 1_000_000 ether;
         dola.approve(address(newOtc), dolaAmountIn);
         vm.expectRevert("Buy period ended or not started");
-        newOtc.buy(); // Should revert as buy period is not started
+        newOtc.buy(1 ether); // Should revert as buy period is not started
         vm.stopPrank();
     }
 
@@ -232,17 +242,114 @@ contract RepayRewardEscrowTest is Test {
         uint256 dolaAmountIn = escrow.dolaAllocations(user1);
         dola.approve(address(escrow), dolaAmountIn);
         vm.expectRevert("Buy period ended or not started");
-        escrow.buy(); // Should revert as buy period is not started
+        escrow.buy(1 ether); // Should revert as buy period is not started
         vm.stopPrank();
 
         // Extend the buy deadline
         vm.prank(operator);
-        escrow.extendDeadline(2); // Extend the deadline by 2 days
+        escrow.setDeadline(block.timestamp + 2 days); // Extend the deadline to 2 days from now
 
-        vm.prank(user1);
-        uint256 shares = escrow.buy(); // Should succeed now
+        vm.startPrank(user1);
+        uint256 shares = escrow.buy(sInv.previewDeposit(uint256(dolaAmountIn * 1 ether / escrow.INV_PRICE()))); // Should succeed now
         assertEq(shares, escrow.balanceOf(user1), "Shares should match after extended buy");
         assertEq(escrow.dolaAllocations(user1), 0, "User1 commitment should be zero after buy");
+    }
+
+    function test_send_bal_if_dola_amount_larger_and_within_capacity() public {
+        uint256 dolaAmount = 1_000_000 ether;
+        // get capacity of sale handler for anDola borrowers
+        address anDolaBorrower1 = address(0xf508c58ce37ce40a40997C715075172691F92e2D); // User1's anDola borrower
+        uint256 capacity = anDola.borrowBalanceStored(anDolaBorrower1);
+        vm.prank(gov);
+        dola.mint(address(escrow), dolaAmount / 2); // Mint some DOLA but less than dolaAmount to escrow contract
+        uint256 balInEscrow = dola.balanceOf(address(escrow));
+        assertGt(dolaAmount, balInEscrow, "Escrow should have less DOLA than requested to send");
+        vm.prank(operator);
+        escrow.sendToSaleHandler(dolaAmount);
+        assertEq(dola.balanceOf(address(escrow)), 0, "Escrow should have no DOLA after sending");
+        assertApproxEqAbs(
+            anDola.borrowBalanceStored(anDolaBorrower1),
+            capacity - balInEscrow,
+            1100 ether,
+            "Sale Handler capacity should be reduced by the amount sent"
+        );
+    }
+
+    function test_send_capacity_if_bal_larger() public {
+        IAnDola anDola = IAnDola(0x7Fcb7DAC61eE35b3D4a51117A7c58D53f0a8a670);
+        address anDolaBorrower1 = address(0xf508c58ce37ce40a40997C715075172691F92e2D); // User1's anDola borrower
+        uint256 anDolaBalance1Before = anDola.borrowBalanceStored(anDolaBorrower1);
+        // get capacity of sale handler for anDola borrower1
+        uint256 capacity = anDola.borrowBalanceStored(anDolaBorrower1);
+        vm.prank(gov);
+        dola.mint(address(escrow), capacity * 2); // Mint more DOLA than capacity to escrow contract
+        uint256 balInEscrow = dola.balanceOf(address(escrow));
+        assertGt(balInEscrow, capacity, "Escrow should have more DOLA than Sale Handler capacity");
+        vm.prank(operator);
+        escrow.sendToSaleHandler(balInEscrow);
+        assertEq(dola.balanceOf(address(escrow)), balInEscrow - capacity, "Escrow should have DOLA left after sending");
+        assertApproxEqAbs(
+            anDola.borrowBalanceStored(anDolaBorrower1),
+            0,
+            1100 ether,
+            "Sale Handler capacity should be reduced by the amount sent"
+        );
+    }
+
+    function test_send_capacity_if_dola_amount_lower_than_bal_and_within_capacity() public {
+        uint256 dolaAmount = 5_000_000 ether; // more than capacity
+        // get capacity of sale handler for anDola borrowers
+        address anDolaBorrower1 = address(0xf508c58ce37ce40a40997C715075172691F92e2D); // User1's anDola borrower
+        uint256 capacity = anDola.borrowBalanceStored(anDolaBorrower1);
+        assertGt(dolaAmount, capacity, "DOLA amount should be larger than Sale Handler capacity");
+        vm.prank(gov);
+        dola.mint(address(escrow), dolaAmount * 2); // Mint more DOLA than dolaAmount to escrow contract
+        uint256 balInEscrow = dola.balanceOf(address(escrow));
+        vm.prank(operator);
+        escrow.sendToSaleHandler(dolaAmount);
+        assertEq(dola.balanceOf(address(escrow)), balInEscrow - capacity, "Escrow should have DOLA left after sending");
+        assertApproxEqAbs(
+            anDola.borrowBalanceStored(anDolaBorrower1),
+            0,
+            1100 ether,
+            "Sale Handler capacity should be reduced by the amount sent"
+        );
+    }
+
+    function test_send_dola_amount_if_lower_than_bal_and_within_capacity() public {
+        uint256 dolaAmount = 100 ether;
+        // get capacity of sale handler for anDola borrowers
+        address anDolaBorrower1 = address(0xf508c58ce37ce40a40997C715075172691F92e2D); // User1's anDola borrower
+        uint256 capacity = anDola.borrowBalanceStored(anDolaBorrower1);
+        vm.prank(gov);
+        dola.mint(address(escrow), dolaAmount * 2); // Mint some DOLA to escrow contract
+        uint256 balInEscrow = dola.balanceOf(address(escrow));
+        assertLt(balInEscrow, capacity, "Escrow should have less DOLA than Sale Handler capacity");
+        vm.prank(operator);
+        escrow.sendToSaleHandler(dolaAmount);
+        assertEq(
+            dola.balanceOf(address(escrow)), balInEscrow - dolaAmount, "Escrow should have DOLA left after sending"
+        );
+        assertApproxEqAbs(
+            anDola.borrowBalanceStored(anDolaBorrower1),
+            capacity - dolaAmount,
+            1100 ether,
+            "Sale Handler capacity should be reduced by the amount sent"
+        );
+    }
+
+    function test_fail_if_lsInvOut_lower_than_minLsInvOut() public {
+        uint256 user1Commitment = escrow.dolaAllocations(user1);
+        uint256 sInvSupplyBefore = sInv.totalSupply();
+        assertGt(user1Commitment, 0, "User1 should have a DOLA allocation");
+        vm.startPrank(user1);
+        dola.approve(address(escrow), user1Commitment);
+        uint256 expectedInvAmount = user1Commitment * 1 ether / escrow.INV_PRICE();
+        uint256 expectedSInvVested = sInv.previewDeposit(expectedInvAmount);
+        uint256 minLsInvOut = expectedSInvVested + 1 ether; // Set minLsInvOut to be more than expected
+        vm.expectRevert("Insufficient shares received");
+        escrow.buy(minLsInvOut);
+        vm.stopPrank();
     }
 
     function test_fail_setDolaAllocation_if_not_operator() public {
@@ -250,9 +357,9 @@ contract RepayRewardEscrowTest is Test {
         escrow.setDolaAllocation(user1, 500_000 ether);
     }
 
-    function test_fail_extendDeadline_if_not_operator() public {
+    function test_fail_setDeadline_if_not_operator() public {
         vm.expectRevert("Only operator");
-        escrow.extendDeadline(2);
+        escrow.setDeadline(block.timestamp + 30 days); // Should revert as only operator can set deadline
     }
 
     function test_fail_startBuyPeriod_if_not_governance() public {
@@ -366,7 +473,7 @@ contract RepayRewardEscrowTest is Test {
         vm.startPrank(user1);
         dola.approve(address(escrow), dolaAmount1);
         uint256 expectedSInvVested = sInv.previewDeposit(dolaAmount1 * 1 ether / escrow.INV_PRICE());
-        uint256 lsInvAmount1 = escrow.buy();
+        uint256 lsInvAmount1 = escrow.buy(expectedSInvVested);
         assertEq(lsInvAmount1, expectedSInvVested, "lsINV amount should match expected sINV vested amount for user1");
         assertEq(escrow.balanceOf(user1), lsInvAmount1, "lsINV balance for user1 should be correct");
         assertEq(sInv.balanceOf(address(escrow)), lsInvAmount1, "sINV balance for escrow should be correct");
@@ -377,7 +484,7 @@ contract RepayRewardEscrowTest is Test {
         vm.startPrank(user2);
         dola.approve(address(escrow), dolaAmount2);
         expectedSInvVested = sInv.previewDeposit(dolaAmount2 * 1 ether / escrow.INV_PRICE());
-        uint256 lsInvAmount2 = escrow.buy();
+        uint256 lsInvAmount2 = escrow.buy(expectedSInvVested);
         assertEq(lsInvAmount2, expectedSInvVested, "lsINV amount should match expected sINV vested amount for user2");
         assertEq(escrow.balanceOf(user2), lsInvAmount2, "lsINV balance for user2 should be correct");
         assertEq(
@@ -390,7 +497,7 @@ contract RepayRewardEscrowTest is Test {
         vm.startPrank(user3);
         dola.approve(address(escrow), dolaAmount3);
         expectedSInvVested = sInv.previewDeposit(dolaAmount3 * 1 ether / escrow.INV_PRICE());
-        uint256 lsInvAmount3 = escrow.buy();
+        uint256 lsInvAmount3 = escrow.buy(expectedSInvVested);
         assertEq(lsInvAmount3, expectedSInvVested, "lsINV amount should match expected sINV vested amount for user3");
         assertEq(escrow.balanceOf(user3), lsInvAmount3, "lsINV balance for user3 should be correct");
         assertEq(
@@ -405,7 +512,7 @@ contract RepayRewardEscrowTest is Test {
         vm.startPrank(user4);
         dola.approve(address(escrow), dolaAmount4);
         expectedSInvVested = sInv.previewDeposit(dolaAmount4 * 1 ether / escrow.INV_PRICE());
-        uint256 lsInvAmount4 = escrow.buy();
+        uint256 lsInvAmount4 = escrow.buy(expectedSInvVested);
         assertEq(lsInvAmount4, expectedSInvVested, "lsINV amount should match expected sINV vested amount for user4");
         assertEq(escrow.balanceOf(user4), lsInvAmount4, "lsINV balance for user4 should be correct");
         assertEq(
@@ -420,7 +527,7 @@ contract RepayRewardEscrowTest is Test {
         vm.startPrank(user5);
         dola.approve(address(escrow), dolaAmount5);
         expectedSInvVested = sInv.previewDeposit(dolaAmount5 * 1 ether / escrow.INV_PRICE());
-        uint256 lsInvAmount5 = escrow.buy();
+        uint256 lsInvAmount5 = escrow.buy(expectedSInvVested);
         assertEq(lsInvAmount5, expectedSInvVested, "lsINV amount should match expected sINV vested amount for user5");
         assertEq(escrow.balanceOf(user5), lsInvAmount5, "lsINV balance for user5 should be correct");
         assertEq(
@@ -435,7 +542,7 @@ contract RepayRewardEscrowTest is Test {
         vm.startPrank(user6);
         dola.approve(address(escrow), dolaAmount6);
         expectedSInvVested = sInv.previewDeposit(dolaAmount6 * 1 ether / escrow.INV_PRICE());
-        uint256 lsInvAmount6 = escrow.buy();
+        uint256 lsInvAmount6 = escrow.buy(expectedSInvVested);
         assertEq(lsInvAmount6, expectedSInvVested, "lsINV amount should match expected sINV vested amount for user6");
         assertEq(escrow.balanceOf(user6), lsInvAmount6, "lsINV balance for user6 should be correct");
         assertEq(
@@ -470,16 +577,16 @@ contract RepayRewardEscrowTest is Test {
         );
         uint256 totalDolaSent = dolaAmount1 + dolaAmount2 + dolaAmount3 + dolaAmount4 + dolaAmount5 + dolaAmount6;
         // All user have bought lsINV shares, sending to Sale Handler
-        IAnDola anDola = IAnDola(0x7Fcb7DAC61eE35b3D4a51117A7c58D53f0a8a670);
         address anDolaBorrower1 = address(0xf508c58ce37ce40a40997C715075172691F92e2D); // User1's anDola borrower
         address anDolaBorrower2 = address(0xeA0c959BBb7476DDD6cD4204bDee82b790AA1562); // User2's anDola borrower
         uint256 anDolaBalance1Before = anDola.borrowBalanceStored(anDolaBorrower1);
         assertGt(anDolaBalance1Before, totalDolaSent, "anDola borrower1 has enough capacity to repay");
         uint256 anDolaBalance2Before = anDola.borrowBalanceStored(anDolaBorrower2);
         uint256 totalBorrowsBefore = anDola.totalBorrows();
-        uint256 capacityBefore = escrow.SALE_HANDLER().getCapacity();
-        escrow.sendToSaleHandler(); // Send DOLA to sale handler
-        uint256 capacityAfter = escrow.SALE_HANDLER().getCapacity();
+        uint256 capacityBefore = anDola.borrowBalanceStored(escrow.anDolaBorrower1());
+        vm.prank(operator);
+        escrow.sendToSaleHandler(totalDolaSent); // Send DOLA to sale handler
+        uint256 capacityAfter = anDola.borrowBalanceStored(escrow.anDolaBorrower1());
 
         assertApproxEqAbs(
             capacityBefore - capacityAfter,
