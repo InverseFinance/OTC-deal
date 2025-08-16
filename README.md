@@ -1,66 +1,15 @@
-## Foundry
+## OTC Deal
+This repo contains a contract, `RepayRewardEscrow` that facilitates trades from INV to DOLA, and automatically uses the acquired DOLA to repay bad debt incurred in a previous security incidence.
 
-**Foundry is a blazing fast, portable and modular toolkit for Ethereum application development written in Rust.**
+### RepayRewardEscrow
 
-Foundry consists of:
+The contract has the following features:
 
--   **Forge**: Ethereum testing framework (like Truffle, Hardhat and DappTools).
--   **Cast**: Swiss army knife for interacting with EVM smart contracts, sending transactions and getting chain data.
--   **Anvil**: Local Ethereum node, akin to Ganache, Hardhat Network.
--   **Chisel**: Fast, utilitarian, and verbose solidity REPL.
-
-## Documentation
-
-https://book.getfoundry.sh/
-
-## Usage
-
-### Build
-
-```shell
-$ forge build
-```
-
-### Test
-
-```shell
-$ forge test
-```
-
-### Format
-
-```shell
-$ forge fmt
-```
-
-### Gas Snapshots
-
-```shell
-$ forge snapshot
-```
-
-### Anvil
-
-```shell
-$ anvil
-```
-
-### Deploy
-
-```shell
-$ forge script script/Counter.s.sol:CounterScript --rpc-url <your_rpc_url> --private-key <your_private_key>
-```
-
-### Cast
-
-```shell
-$ cast <subcommand>
-```
-
-### Help
-
-```shell
-$ forge --help
-$ anvil --help
-$ cast --help
-```
+- An operator role that can add/remove whitelisted participants each with an amount of DOLA they must contribute.
+- Whitelisted participants can buy INVs for 25 DOLA price for their allowed limit.
+- INV is pulled from the Inverse Finance DAO treasury address using an INV allowance provided by governance.
+- INV is NOT immediately given to the purchaser. It is instead deposited into sINV (Staked Inverse). Another token called lsINV is minted to the user in an equal amount of the created sINV tokens.
+- The user can redeem each lsINV for 1 sINV after 6 months or more from the deployment of the contract.
+- Governance can sweep any tokens in the contract (including sINV) after 1 year of contract deployment in emergency case where funds are stuck.
+- The contract has a short window where trades can be executed after activation. This prevents the purchaser from having a free option on Inverse at 25 DOLA, should they not make the purchase in reasonable time.
+- DOLA funds are sent to the `SaleHandler` contract which has previously been used to repay bad DOLA debt.
